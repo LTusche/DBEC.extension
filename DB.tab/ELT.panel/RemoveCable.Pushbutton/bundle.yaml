@@ -1,0 +1,7 @@
+title: "Kabel Entfernen"
+tooltip: |-
+  Entfernt das angegebene Kabel aus allen Objekten.
+
+is_beta: false
+author: "Leonard Tusche"
+context: doc-project

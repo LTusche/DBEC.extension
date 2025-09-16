@@ -1,0 +1,23 @@
+title: "Kabelsystem\nKonfigurieren"
+tooltip: |-
+  Konfiguration für das Kabelsystem.
+
+  Es müssen Verteilerbereiche mit Revit-Räumen gezeichnet werden.
+  Revit-Räume befinden sich in einer Revit-Phase, diese Phase kann sich zweckmäßig als Verteilersystem vorgestellt werden.
+
+  Als Raumname der "Verteilerbereiche" muss der Name des zugehörigen Verteilers vergeben werden.
+
+  Die Phase in der sich die Verteilerbereiche befinden, können dann in der Konfiguration ausgewählt werden.
+
+  Verteilersysteme tauchen erst in der Konfiguration auf, wenn es Bauteile im Projekt gibt, die einen der folgenden Parameter befüllt haben:
+  TGA_VT-Systeme
+  TGA_VT-Systeme-Ergänzung
+
+  Die Parameter können mit beliebigen Kürzeln gefüllt werden, beispielsweise:
+  "AV; SV; BEL"
+
+  Als Trennzeichen für mehrere Verteilersysteme wird ein Semicolon(;) verwendet.
+
+is_beta: true
+author: "Leonard Tusche"
+context: doc-project
