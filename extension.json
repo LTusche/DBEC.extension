@@ -1,0 +1,14 @@
+
+{
+    "builtin": "False",
+    "type": "extension",
+    "rocket_mode_compatible": "True",
+    "name": "DBEC",
+    "description": "DBEC Extension for PyRevit",
+    "author": "Leonard Tushe",
+    "author_profile": "https://github.com/LTusche",
+    "url": "https://github.com/LTusche/DBEC.extension.git",
+    "website": "",
+    "image": "",
+    "dependencies": []
+}
