@@ -246,7 +246,14 @@ class Updater(DB.IUpdater):
                                 pass
 
             for elementId in modified_element_ids:
-                element = self.doc.GetElement(elementId)
+                element = None
+                if isinstance(elementId, self.DB.ElementId):
+                    element = self.doc.GetElement(elementId)
+                else:
+                    element = elementId
+                    # if "ElementId" not in self.alerts:
+                    #     self.alerts["ElementId"] = []
+                    # self.alerts["ElementId"].append(element.Id.IntegerValue)
                 if element == None:
                     continue
                 if isinstance(element, self.DB.ElementType):
@@ -268,7 +275,7 @@ class Updater(DB.IUpdater):
                 #                 except:
                 #                     pass
                 #     continue
-                self.func(element)
+                self.elementClashCheck(element)
 
             for elementId in added_element_ids:
                 element = self.doc.GetElement(elementId)
@@ -281,7 +288,7 @@ class Updater(DB.IUpdater):
                 # attr = getattr(element, "SuperComponent", None)
                 # if attr is not None:
                 #     continue
-                self.func(element)
+                self.elementClashCheck(element)
 
             # header_text = "Achtung!"
             # main_text = "Kollision verursacht"
@@ -312,13 +319,14 @@ class Updater(DB.IUpdater):
             #self.PrintException()
 
     @timing
-    def func(self, element):
+    def elementClashCheck(self, element):
         try:
             elementIdValue = element.Id.IntegerValue
 
             if not isinstance(element, self.DB.Element):
                 return
 
+            # Check if element is a provision for voids
             attr = getattr(element, "Symbol", None)
             if attr != None:
                 ifcParameter = element.Symbol.get_Parameter(self.framework.System.Guid("f53d1285-ae3d-4992-a3f1-2e7978be529a"))
@@ -347,41 +355,84 @@ class Updater(DB.IUpdater):
             )
 
             tolerance = (0,0,0,0)
-            elementGeometry = self.GetBasicElementGeometry(element, options, tolerance)
+            elementGeometryBasic, elementGeometry = self.GetBasicElementGeometry(element, options, tolerance)
+            # elementGeometry = self.GetElementGeometry(element, options)
             if elementGeometry.Count == 0:
                 return
-            #elementGeometry = self.GetElementGeometry(element, options)
 
             provisionForVoids = self.framework.System.Collections.Generic.List[self.DB.Element]()
             clashGeometries = self.framework.System.Collections.Generic.List[object]()
             clashKeys = self.framework.System.Collections.Generic.List[object]()
+
+            # if elementIdValue == 2913097:
+            #     if "Added to exclusion list" not in self.alerts:
+            #         self.alerts["Added to exclusion list"] = []
+            #     self.alerts["Added to exclusion list"].append("Checked")
+
+            """EXCLUSION LIST"""
+            exclusionList = self.framework.System.Collections.Generic.List[self.DB.ElementId]()
+            #exclusionList.Add(element.Id)
+            attr = getattr(element, "HostElementId", None)
+            if attr is not None:
+                exclusionList.Add(element.HostElementId)
+            for dependentElementId in element.GetDependentElements(None):
+                exclusionList.Add(dependentElementId)
+            
+            try:
+                connectors = element.MEPModel.ConnectorManager.Connectors
+            except:
+                try:
+                    connectors = element.ConnectorManager.Connectors
+                except:			
+                    connectors = []
+
+            for connector in connectors:
+                for x in connector.AllRefs:
+                    if x.Owner.Id == connector.Owner.Id:
+                        continue
+                    if x.Owner.Id not in exclusionList:
+                        exclusionList.Add(x.Owner.Id)
+                    for dependentElementId in x.Owner.GetDependentElements(self.insulationFilter):
+                        if dependentElementId not in exclusionList:
+                            exclusionList.Add(dependentElementId)
+
+            # if elementIdValue == 2913097:
+            #     if "exclusionList" not in self.alerts:
+            #         self.alerts["exclusionList"] = []
+            #     self.alerts["exclusionList"].append(exclusionList)
+
+            bbox = element.Geometry[options].GetBoundingBox()
+            # tolerance = [x / 304.8 for x in tolerance]
+            # minPoint = self.DB.XYZ(bbox.Min.X - tolerance[1], bbox.Min.Y - tolerance[2], bbox.Min.Z - abs(tolerance[0]))
+            # maxPoint = self.DB.XYZ(bbox.Max.X + tolerance[1], bbox.Max.Y + tolerance[2], bbox.Max.Z + abs(tolerance[3]))
+            minPoint = self.DB.XYZ(bbox.Min.X, bbox.Min.Y, bbox.Min.Z)
+            maxPoint = self.DB.XYZ(bbox.Max.X, bbox.Max.Y, bbox.Max.Z)
+            outline = self.DB.Outline(minPoint, maxPoint)
+
+            systemNameFilter = None
+            if self.insulationFilter.PassesFilter(element):
+                if self.HOST_APP.version >= "2022":
+                    parameter = element.GetParameter(self.DB.ParameterTypeId.RbsSystemNameParam)
+                else:
+                    parameter = element.get_Parameter(self.DB.BuiltInParameter.RBS_SYSTEM_NAME_PARAM)
+                if parameter != None:
+                    systemName = parameter.AsString()
+                    if systemName != None:
+                        systemNameFilter = self.DB.ElementParameterFilter(
+                            self.DB.FilterStringRule(
+                                self.DB.ParameterValueProvider(
+                                    parameter.Id
+                                ),
+                                self.DB.FilterStringEquals(),
+                                systemName,
+                                False
+                            ), True
+                        )
+
             for document in self.documentsToClashCheck:
 
                 clashCollector = self.DB.FilteredElementCollector(document)
-                """EXCLUSION LIST"""
-                exclusionList = self.framework.System.Collections.Generic.List[self.DB.ElementId]()
-                #exclusionList.Add(element.Id)
-                attr = getattr(element, "HostElementId", None)
-                if attr is not None:
-                    exclusionList.Add(element.HostElementId)
-                for dependentElementId in element.GetDependentElements(None):
-                    exclusionList.Add(dependentElementId)
-                
-                try:
-                    connectors = element.MEPModel.ConnectorManager.Connectors
-                except:
-                    try:
-                        connectors = element.ConnectorManager.Connectors
-                    except:			
-                        connectors = []
-                
-                for connector in connectors:
-                    for x in connector.AllRefs:
-                        if x.Owner.Id == connector.Owner.Id:
-                            continue
-                        exclusionList.Add(x.Owner.Id)
-                        for dependentElementId in x.Owner.GetDependentElements(self.insulationFilter):
-                            exclusionList.Add(dependentElementId)
+
 
                 clashCollector.Excluding(exclusionList)
                 clashCollector.WherePasses(self.mainCatFilter)
@@ -398,37 +449,14 @@ class Updater(DB.IUpdater):
                 # bboxIntersectsOrFilter = self.DB.LogicalOrFilter(bboxFilters)
                 # clashCollector.WherePasses(bboxIntersectsOrFilter)
 
-                bbox = element.Geometry[options].GetBoundingBox()
-                # tolerance = [x / 304.8 for x in tolerance]
-                # minPoint = self.DB.XYZ(bbox.Min.X - tolerance[1], bbox.Min.Y - tolerance[2], bbox.Min.Z - abs(tolerance[0]))
-                # maxPoint = self.DB.XYZ(bbox.Max.X + tolerance[1], bbox.Max.Y + tolerance[2], bbox.Max.Z + abs(tolerance[3]))
-                minPoint = self.DB.XYZ(bbox.Min.X, bbox.Min.Y, bbox.Min.Z)
-                maxPoint = self.DB.XYZ(bbox.Max.X, bbox.Max.Y, bbox.Max.Z)
-                outline = self.DB.Outline(minPoint, maxPoint)
                 #clashCollector.WherePasses(self.DB.LogicalOrFilter(self.DB.BoundingBoxIntersectsFilter(outline),self.DB.BoundingBoxIsInsideFilter(outline)))
                 clashCollector.WherePasses(self.DB.BoundingBoxIntersectsFilter(outline))
                 #clashCollector.WherePasses(self.DB.BoundingBoxIsInsideFilter(outline))
 
-                if self.insulationFilter.PassesFilter(element):
-                    if self.HOST_APP.version >= "2022":
-                        parameter = element.GetParameter(self.DB.ParameterTypeId.RbsSystemNameParam)
-                    else:
-                        parameter = element.get_Parameter(self.DB.BuiltInParameter.RBS_SYSTEM_NAME_PARAM)
-                    if parameter != None:
-                        systemName = parameter.AsString()
-                        if systemName != None:
-                            clashCollector.WherePasses(
-                                self.DB.ElementParameterFilter(
-                                    self.DB.FilterStringRule(
-                                        self.DB.ParameterValueProvider(
-                                            parameter.Id
-                                        ),
-                                        self.DB.FilterStringEquals(),
-                                        systemName,
-                                        False
-                                    ), True
-                                )
-                            )
+                
+
+                if systemNameFilter != None:
+                    clashCollector.WherePasses(systemNameFilter)
 
                 # clashCollector.WherePasses(self.DB.ElementIntersectsElementFilter(element))
 
@@ -512,18 +540,18 @@ class Updater(DB.IUpdater):
                     # self.alerts["clashkeys"].append(clashKey)
 
                     tolerance = (0,0,0,0)
-                    clashObjectGeometry = self.GetBasicElementGeometry(clashObject, options, tolerance)
-                    if clashObjectGeometry.Count == 0:
+                    clashObjectGeometryBasic, clashObjectGeometry = self.GetBasicElementGeometry(clashObject, options, tolerance)
+                    # clashObjectGeometry = self.GetElementGeometry(clashObject, options)
+                    if clashObjectGeometryBasic.Count == 0:
                         continue
-                    #clashObjectGeometry = self.GetElementGeometry(clashObject, options)
 
                     geometryList = self.framework.System.Collections.Generic.List[self.DB.GeometryObject]()
-                    for clashOjectGeometryIndex in range(clashObjectGeometry.Count-1, -1, -1):
-                        for geom in elementGeometry:
+                    for clashOjectGeometryIndex in range(clashObjectGeometryBasic.Count-1, -1, -1):
+                        for geom in elementGeometryBasic:
                             try:
                                 solid = self.DB.BooleanOperationsUtils.ExecuteBooleanOperation(
                                     geom,
-                                    clashObjectGeometry.Item[clashOjectGeometryIndex],
+                                    clashObjectGeometryBasic.Item[clashOjectGeometryIndex],
                                     self.DB.BooleanOperationsType.Intersect)
                             except Exception as e:
                                 """Minimal verschieben und noch mal probieren"""
@@ -531,7 +559,7 @@ class Updater(DB.IUpdater):
                                     transform = self.DB.Transform.CreateTranslation(self.DB.XYZ(0.001,0.001,0.001))
                                     solid = self.DB.BooleanOperationsUtils.ExecuteBooleanOperation(
                                         self.DB.SolidUtils.CreateTransformed(geom, transform),
-                                        clashObjectGeometry.Item[clashOjectGeometryIndex],
+                                        clashObjectGeometryBasic.Item[clashOjectGeometryIndex],
                                         self.DB.BooleanOperationsType.Intersect)
                                 except Exception as e:
                                     #self.alerts[e] = ""
@@ -546,9 +574,15 @@ class Updater(DB.IUpdater):
                     clashGeometries.Add(geometryList)
                     clashKeys.Add(clashKey)
 
+            
+            # if elementIdValue == 2913097:
+            #     if "clashElements" not in self.alerts:
+            #         self.alerts["clashElements"] = []
+            #     self.alerts["clashElements"].append(clashCollector.ToElementIds())
+
             for geometryList, clashKey in zip(clashGeometries, clashKeys):
                 for provisionForVoid in provisionForVoids:
-                    provisionForVoidGeo = self.GetBasicElementGeometry(provisionForVoid, options)
+                    provisionForVoidGeo, provisionForVoidGeoComplex = self.GetBasicElementGeometry(provisionForVoid, options)
                     
                     combinedprovisionForVoidGeo = provisionForVoidGeo.Item[0]
                     for geom in provisionForVoidGeo:
@@ -583,6 +617,7 @@ class Updater(DB.IUpdater):
                 if geometryList.Count < 1:
                     continue
                 
+
                 #solid = self.CreateSolidFromBoundingBox(bbox)
                 #geometryList.Add(solid)
                 # for geo in clashObjectGeometry:
@@ -602,6 +637,9 @@ class Updater(DB.IUpdater):
                 if clashKey not in self.transientElementIds:
                     self.transientElementIds[clashKey] = []
                 self.transientElementIds[clashKey].append(transientElementId)
+                
+                # self.alerts["ElementId"].append(clashKey)
+                # self.alerts["TransientElementIds"] = self.transientElementIds[clashKey]
 
                 # argsM = self.framework.System.Array.CreateInstance(self.framework.System.Object, 4)
                 # argsM[0] = self.doc
@@ -771,7 +809,7 @@ class Updater(DB.IUpdater):
                         newGeometry.Add(xtransformedSolid)
                         newGeometry.Add(xtransformedSolid)
 
-            return newGeometry
+            return newGeometry, geometry
                 
         except:
             if "Unknown Elements" not in self.alerts:
@@ -1087,9 +1125,10 @@ class VmCategorie(forms.Reactive):
         self._checked = value
 
 class VmLink(forms.Reactive):
-    def __init__(self, name, linkInstanceId, checked=False, enabled=True):
+    def __init__(self, name, linkInstance, linkInstanceIntegerId, checked=False, enabled=True):
         self._name = name
-        self.linkInstanceId = linkInstanceId
+        self.linkInstance = linkInstance
+        self.linkInstanceIntegerId = linkInstanceIntegerId
         self._checked = checked
         self.enabled = enabled
     @forms.reactive
@@ -1197,7 +1236,7 @@ class Window(forms.WPFWindow, forms.Reactive):
             linkCollector = DB.FilteredElementCollector(self.doc)
             linkCollector.OfClass(DB.RevitLinkInstance)
 
-            self.vm.links.Add(VmLink("<Aktuelles Modell>", -1, checked=True, enabled=False))
+            self.vm.links.Add(VmLink("<Aktuelles Modell>", None, -1, checked=True, enabled=False))
             for link in linkCollector:
                 linkdoc = link.GetLinkDocument()
                 if linkdoc == None:
@@ -1207,7 +1246,7 @@ class Window(forms.WPFWindow, forms.Reactive):
                 else:
                     parameter = link.get_Parameter(DB.BuiltInParameter.RVT_LINK_INSTANCE_NAME)
                 linkName = parameter.AsString()
-                self.vm.links.Add(VmLink(str(linkName)+" - "+linkdoc.Title, link.Id.IntegerValue))
+                self.vm.links.Add(VmLink(str(linkName)+" - "+linkdoc.Title, link, link.Id.IntegerValue))
 
             self.defaultCategories = [self.DB.ElementId(builtInCat).IntegerValue for builtInCat in defaultCategories]
 
@@ -1299,7 +1338,7 @@ class Window(forms.WPFWindow, forms.Reactive):
                 # script.save_config()
 
                 for vmLink in self.vm.links:
-                    strId = str(vmLink.linkInstanceId)
+                    strId = str(vmLink.linkInstanceIntegerId)
                     if strId in cfgLinks[projectId]:
                         vmLink._checked = True
 
@@ -1328,10 +1367,10 @@ class Window(forms.WPFWindow, forms.Reactive):
             # except:
             #     pass
 
-            # for linkInstanceId in self.config["Links"]:
+            # for linkInstanceIntegerId in self.config["Links"]:
             #     for vmlink in self.vm.links:
-            #         if linkInstanceId == str(vmlink.linkInstanceId):
-            #             vmlink.checked = self.config["Links"][linkInstanceId]["Enabled"]
+            #         if linkInstanceIntegerId == str(vmlink.linkInstanceIntegerId):
+            #             vmlink.checked = self.config["Links"][linkInstanceIntegerId]["Enabled"]
             #             break
 
             # for catIntegerId in self.config["Categories"]:
@@ -1394,9 +1433,6 @@ class Window(forms.WPFWindow, forms.Reactive):
 
     def confirmAndCheck(self, sender = None, args = None):
         try:
-            for vmLink in self.vm.links:
-                if vmLink.checked:
-                    pass
             if self.DB.UpdaterRegistry.IsUpdaterRegistered(updaterId):
                 updater = script.get_envvar(CLASH_UPDATER_ENV_VAR)
                 categories = self.framework.System.Collections.Generic.List[DB.ElementId]()
@@ -1410,33 +1446,48 @@ class Window(forms.WPFWindow, forms.Reactive):
                 initialCollector.WhereElementIsNotElementType()
                 initialCollector.WherePasses(catFilter)
 
-                updater = script.get_envvar(CLASH_UPDATER_ENV_VAR)
-                cstomUpdaterData = updater.CustomUpdaterData(updater)
-                cstomUpdaterData._modifiedElementIds = initialCollector.ToElementIds()
-                updater.customUpdaterData.append(cstomUpdaterData)
+                customUpdaterData = updater.CustomUpdaterData(updater)
+                customUpdaterData._modifiedElementIds.AddRange(initialCollector.ToElementIds())
 
-            config = {"Links":{}, "Categories":{}}
-            for vmLink in self.vm.links:
-                config["Links"][str(vmLink.linkInstanceId)] = {"Name": vmLink.name, "Enabled":vmLink.checked}
-            for vmCat in self.vm.allCategories:
-                config["Categories"][str(vmCat.category.Id.IntegerValue)] = {"Name": vmCat.name, "Enabled":vmCat.checked}
-            config["UpdaterActive"] = self.UpdaterStatusBox.IsChecked
+                checkedLinks = []
+                for vmLink in self.vm.links:
+                    if vmLink.checked:
+                        checkedLinks.append(vmLink)
+                        # print(vmLink.name)
 
-            jsonString = json.dumps(config, ensure_ascii=False)
-            paraValue = DB.StringParameterValue(jsonString)
-            transaction = DB.Transaction(HOST_APP.doc, "Echtzeitprüfung Konfiguration Speichern")
-            transaction.Start()
-            try:
-                if self.globalParam == False:
-                    if HOST_APP.version >= "2022":
-                        self.globalParam = DB.GlobalParameter.Create(HOST_APP.doc, "TGA_Clash-Konfiguration", DB.SpecTypeId.String.MultilineText)
-                    else:
-                        self.globalParam = DB.GlobalParameter.Create(HOST_APP.doc, "TGA_Clash-Konfiguration", DB.ParameterType.MultilineText)
-                self.globalParam.SetValue(paraValue)
-                transaction.Commit()
-            except:
-                transaction.RollBack()
-                print(self.traceback.format_exc())
+                linkCollector = self.DB.FilteredElementCollector(self.doc, self.HOST_APP.active_view.Id, checkedLinks[3].linkInstance.Id)
+                linkCollector.WhereElementIsNotElementType()
+                linkCollector.WherePasses(catFilter)
+                elements = linkCollector.ToElements()
+                customUpdaterData._modifiedElementIds.AddRange(elements)
+                # for element in elements:
+                #     print(element.Id.IntegerValue)
+
+                updater.customUpdaterData.append(customUpdaterData)
+
+            # Konfiguration speichern
+            # config = {"Links":{}, "Categories":{}}
+            # for vmLink in self.vm.links:
+            #     config["Links"][str(vmLink.linkInstanceIntegerId)] = {"Name": vmLink.name, "Enabled":vmLink.checked}
+            # for vmCat in self.vm.allCategories:
+            #     config["Categories"][str(vmCat.category.Id.IntegerValue)] = {"Name": vmCat.name, "Enabled":vmCat.checked}
+            # config["UpdaterActive"] = self.UpdaterStatusBox.IsChecked
+
+            # jsonString = json.dumps(config, ensure_ascii=False)
+            # paraValue = DB.StringParameterValue(jsonString)
+            # transaction = DB.Transaction(HOST_APP.doc, "Echtzeitprüfung Konfiguration Speichern")
+            # transaction.Start()
+            # try:
+            #     if self.globalParam == False:
+            #         if HOST_APP.version >= "2022":
+            #             self.globalParam = DB.GlobalParameter.Create(HOST_APP.doc, "TGA_Clash-Konfiguration", DB.SpecTypeId.String.MultilineText)
+            #         else:
+            #             self.globalParam = DB.GlobalParameter.Create(HOST_APP.doc, "TGA_Clash-Konfiguration", DB.ParameterType.MultilineText)
+            #     self.globalParam.SetValue(paraValue)
+            #     transaction.Commit()
+            # except:
+            #     transaction.RollBack()
+            #     print(self.traceback.format_exc())
 
             self.Close()
         except Exception as e:
@@ -1461,9 +1512,9 @@ class Window(forms.WPFWindow, forms.Reactive):
                 # initialCollector.WherePasses(catFilter)
 
                 # updater = script.get_envvar(CLASH_UPDATER_ENV_VAR)
-                # cstomUpdaterData = updater.CustomUpdaterData(updater)
-                # cstomUpdaterData._modifiedElementIds = initialCollector.ToElementIds()
-                # updater.customUpdaterData.append(cstomUpdaterData)
+                # customUpdaterData = updater.CustomUpdaterData(updater)
+                # customUpdaterData._modifiedElementIds = initialCollector.ToElementIds()
+                # updater.customUpdaterData.append(customUpdaterData)
 
 
             cfgCategories = [cat._name for cat in self.vm.allCategories if cat._checked]
@@ -1479,10 +1530,10 @@ class Window(forms.WPFWindow, forms.Reactive):
                 self.usercfg.set_option("links", cfgLinks)
 
             for vmLink in self.vm.links:
-                strId = str(vmLink.linkInstanceId)
+                strId = str(vmLink.linkInstanceIntegerId)
                 if strId == "-1":
                     continue
-                #cfgLinks[projectId][str(vmLink.linkInstanceId)] = {"Name": vmLink.name, "Enabled":vmLink.checked}
+                #cfgLinks[projectId][str(vmLink.linkInstanceIntegerId)] = {"Name": vmLink.name, "Enabled":vmLink.checked}
                 if vmLink.checked:
                     if strId not in cfgLinks[projectId]:
                         cfgLinks[projectId].append(strId)
@@ -1498,7 +1549,7 @@ class Window(forms.WPFWindow, forms.Reactive):
             script.save_config()
             # config = {"Links":{}, "Categories":{}}
             # for vmLink in self.vm.links:
-            #     config["Links"][str(vmLink.linkInstanceId)] = {"Name": vmLink.name, "Enabled":vmLink.checked}
+            #     config["Links"][str(vmLink.linkInstanceIntegerId)] = {"Name": vmLink.name, "Enabled":vmLink.checked}
 
             # config["UpdaterActive"] = self.UpdaterStatusBox.IsChecked
 

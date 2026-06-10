@@ -83,7 +83,7 @@
                 <ColumnDefinition Width="Auto" MinWidth="150"/>
                 <ColumnDefinition Width="Auto" MinWidth="150"/>
             </Grid.ColumnDefinitions>
-            <!--Button Content="Fertigstellen und Prüfung ausführen (Beta)" Margin="7" Padding="3" Grid.Column="1" Click="confirmAndCheck"/-->
+            <Button Content="Fertigstellen und Prüfung ausführen (Beta)" Margin="7" Padding="3" Grid.Column="1" Click="confirmAndCheck"/>
             <Button Content="Fertigstellen" Margin="7" Padding="3" Grid.Column="2" Click="confirmAndClose"/>
         </Grid>
     </Grid>
