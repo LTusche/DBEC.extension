@@ -62,6 +62,8 @@ class Updater(DB.IUpdater):
         self.insulationFilter = self.DB.ElementMulticategoryFilter(typed_list)
 
         self.alreadyExecuted = False
+        self.alreadyCheckedElementIds = self.framework.System.Collections.Generic.List[self.DB.ElementId]()
+
         self.customUpdaterData = []
         self.lightingFixtureSourceId = self.DB.ElementId(self.DB.BuiltInCategory.OST_LightingFixtureSource).IntegerValue
         
@@ -122,6 +124,7 @@ class Updater(DB.IUpdater):
                 return
 
             self.alerts.clear()
+            self.alreadyCheckedElementIds.Clear()
 
             self.doc = data.GetDocument()
             self.app = self.doc.Application
@@ -294,6 +297,10 @@ class Updater(DB.IUpdater):
             # main_text = "Kollision verursacht"
             # timestamp = self.datetime.datetime.now()
             # self.forms.show_balloon(header_text, main_text, tooltip='toolwtip', group='group', is_favourite=False, is_new=False, timestamp = timestamp, click_result = forms.result_item_result_clicked)
+            
+            # if "transientElementIds" not in self.alerts:
+            #     self.alerts["transientElementIds"] = []
+            # self.alerts["transientElementIds"] = self.transientElementIds
 
             alertString = ""
             for alertTitle in self.alerts:
@@ -371,6 +378,7 @@ class Updater(DB.IUpdater):
 
             """EXCLUSION LIST"""
             exclusionList = self.framework.System.Collections.Generic.List[self.DB.ElementId]()
+            exclusionList.AddRange(self.alreadyCheckedElementIds)
             #exclusionList.Add(element.Id)
             attr = getattr(element, "HostElementId", None)
             if attr is not None:
@@ -530,11 +538,16 @@ class Updater(DB.IUpdater):
                     if attr is not None:
                         if clashObject.SuperComponent.Id.IntegerValue in collectorIds:
                             continue
+
                     if elementIdValue < clashObject.Id.IntegerValue:
                         clashKey = str(elementIdValue) + "_" + str(clashObject.Id.IntegerValue)
                     else:
                         clashKey = str(clashObject.Id.IntegerValue) + "_" + str(elementIdValue)
                     
+                    # if clashKey in self.transientElementIds:
+                        # continue
+                        # pass
+
                     # if "clashkeys" not in self.alerts:
                     #     self.alerts["clashkeys"] = []
                     # self.alerts["clashkeys"].append(clashKey)
@@ -634,9 +647,6 @@ class Updater(DB.IUpdater):
                 argsM[3] = self.DB.ElementId.InvalidElementId
                 #argsM[3] = self.style.Id
                 transientElementId = method.Invoke(None, argsM)
-                if clashKey not in self.transientElementIds:
-                    self.transientElementIds[clashKey] = []
-                self.transientElementIds[clashKey].append(transientElementId)
                 
                 # self.alerts["ElementId"].append(clashKey)
                 # self.alerts["TransientElementIds"] = self.transientElementIds[clashKey]
@@ -648,19 +658,27 @@ class Updater(DB.IUpdater):
                 # argsM[3] = self.DB.ElementId.InvalidElementId
                 # transientElementId = method.Invoke(None, argsM)
                 # self.transientElementIds[elementIdValue].append(transientElementId)
+                
+                # if clashKey not in self.transientElementIds:
+                if False: # Create DirectShape Kollisionskörper
+                    directShape = self.DB.DirectShape.CreateElement(self.doc, self.DB.ElementId(self.DB.BuiltInCategory.OST_ElectricalEquipment))
+                    isValid = directShape.IsValidShape(geometryList)
+                    if isValid == False:
+                        for index in range(geometryList.Count-1, -1, -1):
+                            if not isinstance(geometryList[index], self.DB.Solid):
+                                continue
+                            isValid = directShape.IsValidGeometry(geometryList[index])
+                            if not isValid:
+                                geometryList.RemoveAt(index)
 
-                # directShape = self.DB.DirectShape.CreateElement(self.doc, self.DB.ElementId(self.DB.BuiltInCategory.OST_ElectricalEquipment))
-                # isValid = directShape.IsValidShape(geometryList)
-                # if isValid == False:
-                #     for index in range(geometryList.Count-1, -1, -1):
-                #         if not isinstance(geometryList[index], self.DB.Solid):
-                #             continue
-                #         isValid = directShape.IsValidGeometry(geometryList[index])
-                #         if not isValid:
-                #             geometryList.RemoveAt(index)
+                    directShape.SetShape(geometryList)
+                    directShape.SetName(clashKey)
+                
+                if clashKey not in self.transientElementIds:
+                    self.transientElementIds[clashKey] = []
+                self.transientElementIds[clashKey].append(transientElementId)
 
-                # directShape.SetShape(geometryList)
-                # directShape.SetName(clashKey)
+                self.alreadyCheckedElementIds.Add(element.Id)
 
         except:
             self.PrintException()
@@ -747,7 +765,7 @@ class Updater(DB.IUpdater):
                     transformedSolid = self.DB.SolidUtils.CreateTransformed(newSolid, baseTransform)
                     newGeometry.Add(transformedSolid)
                     newGeometry.Add(transformedSolid)
-            else:
+            elif isinstance(element.Location, self.DB.LocationCurve):
                 startPoint = element.Location.Curve.GetEndPoint(0)
                 endPoint = element.Location.Curve.GetEndPoint(1)
                 baseTransform = None
@@ -1455,11 +1473,12 @@ class Window(forms.WPFWindow, forms.Reactive):
                         checkedLinks.append(vmLink)
                         # print(vmLink.name)
 
-                linkCollector = self.DB.FilteredElementCollector(self.doc, self.HOST_APP.active_view.Id, checkedLinks[3].linkInstance.Id)
-                linkCollector.WhereElementIsNotElementType()
-                linkCollector.WherePasses(catFilter)
-                elements = linkCollector.ToElements()
-                customUpdaterData._modifiedElementIds.AddRange(elements)
+                # linkCollector = self.DB.FilteredElementCollector(self.doc, self.HOST_APP.active_view.Id, checkedLinks[3].linkInstance.Id)
+                # linkCollector.WhereElementIsNotElementType()
+                # linkCollector.WherePasses(catFilter)
+                # elements = linkCollector.ToElements()
+                # customUpdaterData._modifiedElementIds.AddRange(elements)
+
                 # for element in elements:
                 #     print(element.Id.IntegerValue)
 
